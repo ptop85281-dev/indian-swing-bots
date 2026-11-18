@@ -2,15 +2,12 @@ import os
 import requests
 
 def ask_llm(prompt: str) -> str:
-    """
-    Groq અથવા xAI પરથી જવાબ મેળવે છે
-    """
     api_key = os.getenv("GROQ_API_KEY") or os.getenv("XAI_API_KEY")
     
     if not api_key:
         return "API Key not found in secrets"
 
-    # Groq API (gsk_ key માટે)
+    # Groq API
     if api_key.startswith("gsk_"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
@@ -18,11 +15,12 @@ def ask_llm(prompt: str) -> str:
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.3-70b-versatile",
+            "model": "llama-3.1-70b-versatile",
             "messages": [
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.3
+            "temperature": 0.3,
+            "max_tokens": 1024
         }
     else:
         # xAI API
@@ -40,7 +38,7 @@ def ask_llm(prompt: str) -> str:
         }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response = requests.post(url, headers=headers, json=data, timeout=45)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
