@@ -1,44 +1,53 @@
 import os
 import yfinance as yf
 import requests
+from datetime import datetime
+
+def analyze_with_ai(stock, current_price, hist_data):
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return "Error: GROQ_API_KEY મિસિંગ છે."
+    
+    prompt = f"Stock: {stock}, Current Price: {current_price}. Last 5 days close: {hist_data}. Give a strict 1-sentence technical swing trading verdict (Buy/Sell/Hold and why). No fluff."
+    
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    data = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    
+    response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data)
+    if response.status_code == 200:
+        return response.json()['choices'][0]['message']['content'].strip()
+    return "AI Analysis નિષ્ફળ."
 
 def send_telegram(text):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    
-    if not token or not chat_id:
-        print("Error: Telegram credentials missing in GitHub Secrets!")
-        return
-    
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = {"chat_id": chat_id, "text": text}
-    response = requests.post(url, json=data)
-    
-    if response.status_code == 200:
-        print("Telegram message successfully sent!")
-    else:
-        print("Failed to send Telegram message:", response.text)
+    if token and chat_id:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
 
 def main():
-    print("Starting Swing Bot Scan...")
-    
-    # ઉદાહરણ માટે 3 સ્ટોક્સ ચેક કરીએ છીએ જેથી 0 સેકન્ડમાં કોડ પૂરો ન થઈ જાય
-    stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
-    message = "🚀 Nifty Swing Bot Test Results:\n\n"
+    stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"] # અહી Nifty 500 ના સ્ટોક્સ ઉમેરી શકો છો
+    results = []
     
     for stock in stocks:
         try:
-            data = yf.download(stock, period="2d", progress=False)
-            if not data.empty:
-                # લેટેસ્ટ ક્લોઝિંગ પ્રાઇસ કાઢવા માટે
-                close_price = float(data['Close'].iloc[-1])
-                message += f"✅ {stock}: ₹{close_price:.2f}\n"
-        except Exception as e:
-            print(f"Error fetching {stock}: {e}")
+            df = yf.Ticker(stock).history(period="5d")
+            if df.empty: continue
             
-    # ટેલિગ્રામ પર મેસેજ મોકલવાનું ફંક્શન કોલ થશે
-    send_telegram(message)
-    print("Bot execution completed.")
+            close_price = float(df['Close'].iloc[-1])
+            hist_prices = [round(x, 2) for x in df['Close'].tolist()]
+            
+            ai_verdict = analyze_with_ai(stock, close_price, hist_prices)
+            results.append(f"🔹 *{stock}* (₹{close_price})\n🤖 *AI:* {ai_verdict}")
+        except Exception:
+            pass
+            
+    if results:
+        msg = f"🚀 *AI Swing Trading Setup* ({datetime.now().strftime('%d %b %Y')})\n\n" + "\n\n".join(results)
+        send_telegram(msg)
 
 if __name__ == "__main__":
     main()
