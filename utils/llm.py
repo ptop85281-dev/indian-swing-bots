@@ -14,7 +14,7 @@ def ask_llm(prompt: str) -> str:
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.1-8b-instant",
+            "model":"llama3-8b-8192" ,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
