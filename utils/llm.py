@@ -7,7 +7,6 @@ def ask_llm(prompt: str) -> str:
     if not api_key:
         return "API Key not found in secrets"
 
-    # Groq API
     if api_key.startswith("gsk_"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
@@ -15,7 +14,7 @@ def ask_llm(prompt: str) -> str:
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.1-70b-versatile",
+            "model": "llama-3.1-8b-instant",
             "messages": [
                 {"role": "user", "content": prompt}
             ],
@@ -23,7 +22,6 @@ def ask_llm(prompt: str) -> str:
             "max_tokens": 1024
         }
     else:
-        # xAI API
         url = "https://api.x.ai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -39,7 +37,8 @@ def ask_llm(prompt: str) -> str:
 
     try:
         response = requests.post(url, headers=headers, json=data, timeout=45)
-        response.raise_for_status()
+        if response.status_code != 200:
+            return f"Error {response.status_code}: {response.text}"
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         return f"Error: {str(e)}"
