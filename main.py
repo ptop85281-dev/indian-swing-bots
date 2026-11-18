@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
+from io import StringIO
 
 def analyze_with_ai(stock, current_price, hist_data):
     api_key = os.environ.get("GROQ_API_KEY")
@@ -13,7 +14,7 @@ def analyze_with_ai(stock, current_price, hist_data):
     
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     data = {
-        "model": "mixtral-8x7b-32768",  # ફ્રી એકાઉન્ટ માટે સૌથી બેસ્ટ અને ફાસ્ટ મોડેલ 
+        "model": "mixtral-8x7b-32768",  
         "messages": [{"role": "user", "content": prompt}]
     }
     
@@ -35,9 +36,14 @@ def send_telegram(text):
 
 def main():
     print("Fetching Nifty 50 Stocks...")
-    # Nifty 50 ના લેટેસ્ટ 50 સ્ટોક્સ ડાયરેક્ટ ઇન્ટરનેટ પરથી લેશે 
+    
+    # Wikipedia 403 Forbidden Error સોલ્વ કરવા માટે User-Agent ઉમેર્યો છે
     url = 'https://en.wikipedia.org/wiki/NIFTY_50'
-    html = pd.read_html(url)
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    response = requests.get(url, headers=headers)
+    
+    # HTML ને વાંચવા માટે
+    html = pd.read_html(StringIO(response.text))
     df_nifty = html[2]
     stocks = df_nifty['Symbol'].apply(lambda x: x + ".NS").tolist()
     
@@ -51,12 +57,11 @@ def main():
             close_price = float(df['Close'].iloc[-1])
             prev_close = float(df['Close'].iloc[-2])
             
-            # વોલ્યુમ બ્રેકઆઉટ ચેક (એવરેજ કરતા 20% વધારે વોલ્યુમ)
+            # વોલ્યુમ બ્રેકઆઉટ ચેક 
             df['Vol_20_Avg'] = df['Volume'].rolling(window=20).mean()
             current_vol = float(df['Volume'].iloc[-1])
             avg_vol = float(df['Vol_20_Avg'].iloc[-1])
             
-            # જો સ્ટોકમાં બ્રેકઆઉટ હોય તો જ AI પાસે લઈ જાવ!
             if current_vol > (1.2 * avg_vol) and close_price > prev_close:
                 hist_prices = [round(x, 2) for x in df['Close'].tail(5).tolist()]
                 ai_verdict = analyze_with_ai(stock, close_price, hist_prices)
@@ -66,14 +71,4 @@ def main():
             pass
             
     # ટેલિગ્રામ પર મેસેજ
-    date_str = datetime.now().strftime('%d %b %Y')
-    if results:
-        msg = f"🚀 *Smart AI Setup - Nifty 50* ({date_str})\n\n" + "\n\n".join(results)
-    else:
-        msg = f"📊 *Smart AI Setup* ({date_str})\n\nઆજે Nifty 50 માં કોઈ સ્પેશિયલ વોલ્યુમ બ્રેકઆઉટ મળ્યો નથી."
-        
-    send_telegram(msg)
-    print("Done!")
-
-if __name__ == "__main__":
-    main()
+    date_str = datetime.now
