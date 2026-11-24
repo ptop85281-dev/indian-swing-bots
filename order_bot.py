@@ -9,7 +9,9 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 STATE_FILE = "seen_orders.json"
 
 IST = timezone(timedelta(hours=5, minutes=30))
-TODAY = datetime.now(IST).strftime("%Y%m%d")
+NOW = datetime.now(IST)
+TODAY_BSE = NOW.strftime("%Y%m%d")
+TODAY_NSE = NOW.strftime("%d-%m-%Y")
 
 KEYWORDS = re.compile(
     r"\b(order|orders|contract|contracts|loa|letter of award|work order|awarded|bagged)\b",
@@ -30,7 +32,7 @@ def load_seen():
 
 def save_seen(seen_ids):
     with open(STATE_FILE, "w") as f:
-        json.dump(list(seen_ids)[-500:], f)
+        json.dump(list(seen_ids)[-800:], f)
 
 
 def send_telegram(text):
@@ -42,55 +44,80 @@ def send_telegram(text):
     )
 
 
-def fetch_bse_orders():
+def fetch_bse():
     url = (
         f"https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
-        f"?pageno=1&strCat=-1&strPrevDate={TODAY}&strScrip=&strSearch=P&strToDate={TODAY}&strType=C&subcategory=-1"
+        f"?pageno=1&strCat=-1&strPrevDate={TODAY_BSE}&strScrip=&strSearch=P&strToDate={TODAY_BSE}&strType=C&subcategory=-1"
     )
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://www.bseindia.com/",
         "Accept": "application/json",
     }
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    return resp.json().get("Table", [])
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        items = []
+        for row in r.json().get("Table", []):
+            pdf = row.get("ATTACHMENTNAME", "")
+            items.append({
+                "id": f"BSE_{row.get('NEWSID', '')}",
+                "company": row.get("SLONGNAME", "Unknown"),
+                "symbol": str(row.get("SCRIP_CD", "")),
+                "text": f"{row.get('HEADLINE', '')} {row.get('MORE', '')}",
+                "link": f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{pdf}" if pdf else "",
+            })
+        return items
+    except Exception:
+        return []
+
+
+def fetch_nse():
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+    }
+    try:
+        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        url = f"https://www.nseindia.com/api/corporate-announcements?index=equities&from_date={TODAY_NSE}&to_date={TODAY_NSE}"
+        r = session.get(url, headers=headers, timeout=15)
+        items = []
+        for row in r.json():
+            seq = row.get("seq_id") or row.get("an_dt", "")
+            items.append({
+                "id": f"NSE_{row.get('symbol', '')}_{seq}",
+                "company": row.get("sm_name", "Unknown"),
+                "symbol": row.get("symbol", ""),
+                "text": f"{row.get('desc', '')} {row.get('attchmntText', '')}",
+                "link": row.get("attchmntFile", ""),
+            })
+        return items
+    except Exception:
+        return []
 
 
 def main():
     seen = load_seen()
-    rows = fetch_bse_orders()
     new_seen = set(seen)
+    all_items = fetch_bse() + fetch_nse()
 
-    for row in rows:
-        news_id = str(row.get("NEWSID", ""))
-        if not news_id or news_id in seen:
+    for item in all_items:
+        uid = item["id"]
+        if not uid or uid in seen:
             continue
-
-        headline = row.get("HEADLINE", "") or ""
-        more = row.get("MORE", "") or ""
-        combined = f"{headline} {more}"
-
-        if KEYWORDS.search(combined):
-            company = row.get("SLONGNAME", "Unknown")
-            scrip = row.get("SCRIP_CD", "")
-            pdf_name = row.get("ATTACHMENTNAME", "")
-            pdf_link = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{pdf_name}" if pdf_name else ""
-
-            val_match = VALUE_PATTERN.search(combined)
+        if KEYWORDS.search(item["text"]):
+            val_match = VALUE_PATTERN.search(item["text"])
             order_val = f"₹{val_match.group(1)} {val_match.group(2)}" if val_match else "Check PDF"
-
             msg = (
-                f"🚨 <b>ORDER ALERT: {company}</b> ({scrip})\n"
+                f"🚨 <b>ORDER ALERT: {item['company']}</b> ({item['symbol']})\n"
                 f"💰 <b>Est. Value:</b> {order_val}\n"
-                f"📰 <b>Headline:</b> {headline[:220]}\n"
+                f"📰 <b>Details:</b> {item['text'][:220]}\n"
             )
-            if pdf_link:
-                msg += f"📄 <a href='{pdf_link}'>Open BSE PDF</a>"
-
+            if item["link"]:
+                msg += f"📄 <a href='{item['link']}'>Open Filing PDF</a>"
             send_telegram(msg)
-
-        new_seen.add(news_id)
+        new_seen.add(uid)
 
     save_seen(new_seen)
 
